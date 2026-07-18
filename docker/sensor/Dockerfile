@@ -1,10 +1,11 @@
 FROM zeek/zeek:6.0.4
 
 ARG LIBRDKAFKA_VERSION=2.3.0
-ARG ZEEK_KAFKA_VERSION=v1.3.0
+ARG ZEEK_KAFKA_VERSION=v1.2.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
+        ca-certificates \
         cmake \
         git \
         libssl-dev \
