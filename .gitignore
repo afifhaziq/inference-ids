@@ -1,1 +1,10 @@
 .superpowers/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+uv.lock
+pcaps/*
+!pcaps/.gitkeep
+models/*
+!models/.gitkeep
