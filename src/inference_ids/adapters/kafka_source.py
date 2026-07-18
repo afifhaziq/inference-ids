@@ -30,8 +30,15 @@ class KafkaFlowSource:
         message = self._consumer.poll(timeout_seconds)
         if message is None:
             return None
-        if message.error():
-            raise RuntimeError(f"Kafka error: {message.error()}")
+        error = message.error()
+        if error is not None:
+            if error.fatal():
+                raise RuntimeError(f"Kafka error: {error}")
+            # Non-fatal (e.g. UNKNOWN_TOPIC_OR_PART while the topic hasn't been
+            # created yet, the normal state on a fresh boot before the sensor
+            # has produced anything) -- retry on the next poll instead of
+            # crashing the consumer.
+            return None
         return json.loads(message.value())
 
     def close(self) -> None:
