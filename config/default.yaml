@@ -17,7 +17,7 @@ inference_engine:
   pytorch:
     module: "inference_ids.reference_model"
     class_name: "IDSModel"
-    state_dict_path: "models/reference_ids_model.pth"
+    state_dict_path: "/models/reference_ids_model.pth"
     init_kwargs:
       input_features: 11
       num_classes: 3
