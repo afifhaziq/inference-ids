@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         libssl-dev \
         zlib1g-dev \
+        libpcap-dev \
         wget \
         tcpreplay \
         iproute2 \
@@ -26,7 +27,7 @@ RUN wget -q "https://github.com/confluentinc/librdkafka/archive/refs/tags/v${LIB
 
 ENV LIBRDKAFKA_ROOT=/usr/local
 
-RUN zkg install --force "seisollc/zeek-kafka@${ZEEK_KAFKA_VERSION}"
+RUN zkg install --force --version "${ZEEK_KAFKA_VERSION}" https://github.com/SeisoLLC/zeek-kafka
 
 COPY local.zeek /usr/local/zeek/share/zeek/site/local.zeek
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
