@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Target environment for this build is Docker Compose on WSL2. Do not optimize for Jetson/bare-metal; do not choose anything that blocks it later (spec §1, §6).
-- `tcpreplay` must always run with `--fix-checksums` (spec §3.1) — checksum offload on veth pairs produces bad checksums that don't exist on real wire.
+- `tcpreplay` must always run with checksum recalculation enabled (spec §3.1) — checksum offload on veth pairs produces bad checksums that don't exist on real wire. **Verified against a real build:** the real flag is `-C`/`--fixcsum`, on the `tcpreplay-edit` binary specifically — Debian's `apt-get install tcpreplay` ships a build with "Packet editing: disabled" (no checksum support at all); the plugin/binary must be compiled from source to get `tcpreplay-edit`. (`--fix-checksums` never existed as a real flag; that was a planning error, not a real tcpreplay option.)
 - Zeek must use `SeisoLLC/zeek-kafka` (actively maintained fork), never the archived Apache Metron plugin (spec §3.2). Pin `librdkafka` and `zeek-kafka` versions in the Dockerfile; do not float on `master`.
 - Kafka runs single-broker KRaft mode — no ZooKeeper, no Confluent REST Proxy (spec §3.3).
 - `Kafka::tag_json = T` wraps each record as `{"conn": {...}}`; only `Conn::LOG` is sent (`Kafka::logs_to_send = set(Conn::LOG)`) — restrict to what the model needs (spec §3.2).
@@ -2024,18 +2024,34 @@ git commit -m "feat: wire adapters via config-driven bootstrap and add CLI entry
 ```zeek
 @load packages/zeek-kafka
 
-redef Log::default_writer = Log::WRITER_KAFKAWRITER;
 redef Kafka::topic_name = "zeek-flows";
 redef Kafka::tag_json = T;
-redef Kafka::logs_to_send = set(Conn::LOG);
+redef use_conn_size_analyzer = T;
 redef Kafka::kafka_conf = table(
-    ["metadata.broker.list"] = "backend:9092"
+	["metadata.broker.list"] = "backend:9092"
 );
 
-redef use_conn_size_analyzer = T;
+hook Conn::log_policy(rec: Conn::Info, id: Log::ID, filter: Log::Filter)
+	{
+	if ( rec$id$resp_p == 9092/tcp || rec$id$orig_p == 9092/tcp )
+		break;
+	}
+
+event zeek_init() &priority=-10
+	{
+	Log::add_filter(Conn::LOG, [
+		$name = "kafka-conn",
+		$writer = Log::WRITER_KAFKAWRITER
+	]);
+	}
 ```
 
 `use_conn_size_analyzer = T` is required for `orig_pkts`/`resp_pkts`/`orig_ip_bytes`/`resp_ip_bytes` to populate (confirmed against the sibling `zeek_pilot` project's notes) — without it those fields stay zero and the feature extractor's packet-count features are meaningless. `metadata.broker.list` points at the `backend` service name — this producer connection is the one remaining cross-container hop in the whole stack.
+
+**Verified against a real build (post-implementation note) — this config differs substantially from the version originally written here, for reasons only discoverable by actually running the stack:**
+1. `redef Log::default_writer = Log::WRITER_KAFKAWRITER` sends *every* log stream to Kafka, not just the ones named in `logs_to_send` — confirmed by seeing `packet_filter`, `reporter`, and `weird` records on the topic alongside `conn`. It also collides with the `Log::add_filter` mechanism's own "conn" path, and Zeek silently renames the stream to "conn-2" to resolve the clash, which breaks `JSONFlowParser`'s assumption that records are wrapped under a literal `"conn"` key. `logs_to_send` is also documented as mutually exclusive with per-filter predicates. The fix: use `Log::add_filter(Conn::LOG, ...)` directly, matching zeek-kafka's own README examples, and drop `Log::default_writer` and `Kafka::logs_to_send` entirely.
+2. Zeek's AF_PACKET capture on `eth0` — the same mechanism that lets tcpreplay and Zeek share one interface — also captures the sensor's *own* librdkafka producer connection to `backend:9092`, which would otherwise get logged and republished as if it were monitored traffic. `Conn::log_policy` (Zeek 6.x's stream-filtering hook; the older `$pred` field on `Log::Filter` shown in some zeek-kafka examples no longer exists on this Zeek version's `Log::Filter` record) vetoes it. Both `orig_p` and `resp_p` must be checked: for connections where Zeek's capture starts mid-stream, it guesses direction heuristically and sometimes assigns the broker's `:9092` side as the "originator" instead of the "responder."
+3. The Kafka writer reads broker connection settings from the global `Kafka::kafka_conf`, not from a filter's own `$config` table — with only a per-filter `$config` set, librdkafka fell back to a `localhost:9092` default and every produce attempt failed with "Connection refused."
 
 - [ ] **Step 2: Write `docker/sensor/entrypoint.sh`**
 
@@ -2059,17 +2075,19 @@ chmod +x docker/sensor/entrypoint.sh
 FROM zeek/zeek:6.0.4
 
 ARG LIBRDKAFKA_VERSION=2.3.0
-ARG ZEEK_KAFKA_VERSION=v1.3.0
+ARG ZEEK_KAFKA_VERSION=v1.2.0
+ARG TCPREPLAY_VERSION=4.4.3
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
+        ca-certificates \
         cmake \
         git \
         libssl-dev \
         zlib1g-dev \
         libpcap-dev \
+        libnet1-dev \
         wget \
-        tcpreplay \
         iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -2084,19 +2102,37 @@ RUN wget -q "https://github.com/confluentinc/librdkafka/archive/refs/tags/v${LIB
 
 ENV LIBRDKAFKA_ROOT=/usr/local
 
+# Debian's `apt-get install tcpreplay` ships a build with "Packet editing: disabled"
+# (no tcpedit/checksum support), which --fixcsum requires. Build from source instead;
+# the same source tree also produces tcpreplay-edit, the packet-editing-enabled binary.
+RUN wget -q "https://github.com/appneta/tcpreplay/releases/download/v${TCPREPLAY_VERSION}/tcpreplay-${TCPREPLAY_VERSION}.tar.gz" \
+    && tar xzf "tcpreplay-${TCPREPLAY_VERSION}.tar.gz" \
+    && cd "tcpreplay-${TCPREPLAY_VERSION}" \
+    && ./configure --prefix=/usr/local \
+    && make -j"$(nproc)" \
+    && make install \
+    && cd .. && rm -rf "tcpreplay-${TCPREPLAY_VERSION}" "tcpreplay-${TCPREPLAY_VERSION}.tar.gz"
+
 RUN zkg install --force --version "${ZEEK_KAFKA_VERSION}" https://github.com/SeisoLLC/zeek-kafka
 
 COPY local.zeek /usr/local/zeek/share/zeek/site/local.zeek
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-WORKDIR /pcaps
+# /pcaps is a read-only bind mount (tcpreplay's input); Zeek needs a writable cwd
+# for ad-hoc ASCII-writer debugging (see docs/VERIFICATION.md step 1) even though
+# the default Kafka-writer config never writes local log files at all.
+WORKDIR /var/log/zeek
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 ```
 
 `ZEEK_KAFKA_VERSION` and `LIBRDKAFKA_VERSION` are pinned per the spec's "do not float on master" requirement — check `https://github.com/SeisoLLC/zeek-kafka/releases` for the latest tag compatible with `zeek/zeek:6.0.4` before first build and update the ARG if needed. The `zkg install` step is the most likely first-build failure point (spec §8 step 1 note: "if step 1 fails, the problem is capabilities or the interface name — not Zeek or Kafka" — that's about capture; a `zkg`/librdkafka build failure is a separate, earlier failure mode to expect and debug on the first `docker compose build sensor`).
 
-**Verified against a real build (post-implementation note):** two issues surfaced only once this was actually built against Docker Desktop, after this plan was written and the code implemented from it. Both are already fixed in the shipped `docker/sensor/Dockerfile`, and the code blocks above have been updated to match: (1) zkg's version pin is a separate `--version VERSION` CLI flag, not an `@version` suffix on the package name/URL — the original `"seisollc/zeek-kafka@${ZEEK_KAFKA_VERSION}"` form errors with "package name not found in sources and also not a usable git URL"; it needs `--version "${ZEEK_KAFKA_VERSION}" https://github.com/SeisoLLC/zeek-kafka` instead. (2) the zeek-kafka plugin's C++ build needs `pcap.h` (from `libpcap-dev`), which wasn't in the original apt-get list and fails with `fatal error: pcap.h: No such file or directory` inside `Packet.h` otherwise.
+**Verified against a real build (post-implementation note):** several issues surfaced only once this was actually built and run against Docker Desktop, after this plan was written and the code implemented from it. All are already fixed in the shipped `docker/sensor/Dockerfile`, and the code block above has been updated to match:
+1. zkg's version pin is a separate `--version VERSION` CLI flag, not an `@version` suffix on the package name/URL — the original `"seisollc/zeek-kafka@${ZEEK_KAFKA_VERSION}"` form errors with "package name not found in sources and also not a usable git URL"; it needs `--version "${ZEEK_KAFKA_VERSION}" https://github.com/SeisoLLC/zeek-kafka` instead.
+2. the zeek-kafka plugin's C++ build needs `pcap.h` (from `libpcap-dev`), which wasn't in the original apt-get list and fails with `fatal error: pcap.h: No such file or directory` inside `Packet.h` otherwise.
+3. `--fix-checksums` was never a real tcpreplay flag — a planning error, not a real option. The real mechanism is `-C`/`--fixcsum` on `tcpreplay-edit`, a *separate binary* from plain `tcpreplay` built by the same upstream source tree; the packet-editing/checksum subsystem (tcpedit) isn't linked into `apt-get install tcpreplay`'s prebuilt binary on Debian at all ("Packet editing: disabled" in `tcpreplay --version`), so tcpreplay must be compiled from source to get `tcpreplay-edit`.
+4. the original `WORKDIR /pcaps` is a read-only bind mount, so Zeek can't write `conn.log` there for the plain-ASCII-writer debugging step in `docs/VERIFICATION.md` step 1 — moved `WORKDIR` to `/var/log/zeek` instead. This never affected the default Kafka-writer config, which writes no local log files at all.
 
 - [ ] **Step 4: Write `docker/backend/server.properties`**
 
@@ -2243,7 +2279,7 @@ mkdir -p pcaps
 cp "${PCAP}" pcaps/
 FILENAME="$(basename "${PCAP}")"
 
-docker compose exec sensor tcpreplay --intf1=eth0 --pps="${PPS}" --fix-checksums "/pcaps/${FILENAME}"
+docker compose exec sensor tcpreplay-edit --intf1=eth0 --pps="${PPS}" --fixcsum "/pcaps/${FILENAME}"
 ```
 
 ```bash
@@ -2318,7 +2354,7 @@ at all, independent of Kafka:
 docker compose build sensor
 docker compose run --rm --entrypoint "zeek -i eth0" sensor
 # in another terminal, replay into that same running container:
-docker compose exec sensor tcpreplay --intf1=eth0 --pps=100 --fix-checksums /pcaps/<your>.pcap
+docker compose exec sensor tcpreplay-edit --intf1=eth0 --pps=100 --fixcsum /pcaps/<your>.pcap
 ```
 
 Check `conn.log` is created inside the sensor container and has rows matching the replayed pcap:
