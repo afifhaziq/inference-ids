@@ -31,8 +31,11 @@ class InferencePipeline:
         self._clock = clock
 
     def run_forever(self) -> None:
-        while True:
-            self.run_one_window()
+        try:
+            while True:
+                self.run_one_window()
+        finally:
+            self._source.close()
 
     def run_one_window(self) -> int:
         records: list[FlowRecord] = []

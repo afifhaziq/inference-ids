@@ -7,7 +7,16 @@ Run these in order. Do not skip ahead — each stage isolates a different failur
 
 - A test pcap in `pcaps/` (e.g. `zeek_pilot/quickstart.pcap` from the sibling project, or any small pcap).
 - A saved reference checkpoint at `models/reference_ids_model.pth` matching `config/default.yaml`'s
-  `inference_engine.pytorch.init_kwargs` (see Task 12/13 for the one-liner to generate it).
+  `inference_engine.pytorch.init_kwargs`. Generate one with:
+
+```bash
+uv run python -c "
+import torch
+from inference_ids.reference_model import IDSModel
+model = IDSModel(input_features=11, num_classes=3)
+torch.save(model.state_dict(), 'models/reference_ids_model.pth')
+"
+```
 
 ## 1. Capture on the sensor's own interface (ASCII writer, no Kafka)
 
@@ -44,8 +53,7 @@ docker compose up -d sensor
 ./scripts/replay.sh pcaps/<your>.pcap
 ```
 
-Confirm records land on the topic (using the `backend` container's own `kafka-console-consumer.sh`, or the
-host-mapped port 9092 from outside Docker):
+Confirm records land on the topic (using the `backend` container's own `kafka-console-consumer.sh`):
 
 ```bash
 docker compose exec backend kafka-console-consumer.sh \

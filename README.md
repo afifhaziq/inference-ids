@@ -29,6 +29,12 @@ separate model-training pipeline and is not implemented here — see `docs/VERIF
 ```bash
 uv sync
 uv run pytest
+uv run python -c "
+import torch
+from inference_ids.reference_model import IDSModel
+model = IDSModel(input_features=11, num_classes=3)
+torch.save(model.state_dict(), 'models/reference_ids_model.pth')
+"
 docker compose build
 make replay PCAP=pcaps/quickstart.pcap
 ```
