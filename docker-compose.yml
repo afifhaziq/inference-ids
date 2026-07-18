@@ -1,0 +1,35 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    container_name: backend
+    volumes:
+      - ./config:/app/config:ro
+      - ./models:/models:ro
+      - kafka-data:/var/lib/kafka/data
+    ports:
+      - "9092:9092"
+    networks:
+      - ntc
+
+  sensor:
+    build:
+      context: ./docker/sensor
+    container_name: sensor
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./pcaps:/pcaps:ro
+    depends_on:
+      - backend
+    networks:
+      - ntc
+
+networks:
+  ntc:
+    driver: bridge
+
+volumes:
+  kafka-data:
