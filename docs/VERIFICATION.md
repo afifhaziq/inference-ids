@@ -27,7 +27,7 @@ at all, independent of Kafka:
 docker compose build sensor
 docker compose run --rm --entrypoint "zeek -i eth0" sensor
 # in another terminal, replay into that same running container:
-docker compose exec sensor tcpreplay --intf1=eth0 --pps=100 --fix-checksums /pcaps/<your>.pcap
+docker compose exec sensor tcpreplay-edit --intf1=eth0 --pps=100 --fixcsum /pcaps/<your>.pcap
 ```
 
 Check `conn.log` is created inside the sensor container and has rows matching the replayed pcap:

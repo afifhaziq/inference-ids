@@ -13,4 +13,4 @@ if [ "${SOURCE_DIR}" != "${PCAPS_DIR}" ]; then
     cp "${PCAP}" "pcaps/${FILENAME}"
 fi
 
-docker compose exec sensor tcpreplay --intf1=eth0 --pps="${PPS}" --fix-checksums "/pcaps/${FILENAME}"
+docker compose exec sensor tcpreplay-edit --intf1=eth0 --pps="${PPS}" --fixcsum "/pcaps/${FILENAME}"
