@@ -2067,6 +2067,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         libssl-dev \
         zlib1g-dev \
+        libpcap-dev \
         wget \
         tcpreplay \
         iproute2 \
@@ -2083,7 +2084,7 @@ RUN wget -q "https://github.com/confluentinc/librdkafka/archive/refs/tags/v${LIB
 
 ENV LIBRDKAFKA_ROOT=/usr/local
 
-RUN zkg install --force "seisollc/zeek-kafka@${ZEEK_KAFKA_VERSION}"
+RUN zkg install --force --version "${ZEEK_KAFKA_VERSION}" https://github.com/SeisoLLC/zeek-kafka
 
 COPY local.zeek /usr/local/zeek/share/zeek/site/local.zeek
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -2094,6 +2095,8 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 ```
 
 `ZEEK_KAFKA_VERSION` and `LIBRDKAFKA_VERSION` are pinned per the spec's "do not float on master" requirement — check `https://github.com/SeisoLLC/zeek-kafka/releases` for the latest tag compatible with `zeek/zeek:6.0.4` before first build and update the ARG if needed. The `zkg install` step is the most likely first-build failure point (spec §8 step 1 note: "if step 1 fails, the problem is capabilities or the interface name — not Zeek or Kafka" — that's about capture; a `zkg`/librdkafka build failure is a separate, earlier failure mode to expect and debug on the first `docker compose build sensor`).
+
+**Verified against a real build (post-implementation note):** two issues surfaced only once this was actually built against Docker Desktop, after this plan was written and the code implemented from it. Both are already fixed in the shipped `docker/sensor/Dockerfile`, and the code blocks above have been updated to match: (1) zkg's version pin is a separate `--version VERSION` CLI flag, not an `@version` suffix on the package name/URL — the original `"seisollc/zeek-kafka@${ZEEK_KAFKA_VERSION}"` form errors with "package name not found in sources and also not a usable git URL"; it needs `--version "${ZEEK_KAFKA_VERSION}" https://github.com/SeisoLLC/zeek-kafka` instead. (2) the zeek-kafka plugin's C++ build needs `pcap.h` (from `libpcap-dev`), which wasn't in the original apt-get list and fails with `fatal error: pcap.h: No such file or directory` inside `Packet.h` otherwise.
 
 - [ ] **Step 4: Write `docker/backend/server.properties`**
 
