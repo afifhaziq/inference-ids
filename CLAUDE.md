@@ -92,10 +92,11 @@ near-immediate per-flow inference; larger values trade latency for throughput.
   derived directly from `FlowRecord`, not a production feature set). The real feature contract belongs to a
   separate model-training pipeline outside this repo. `feature_count = 11` is load-bearing: it must match
   `config/default.yaml`'s `inference_engine.pytorch.init_kwargs.input_features`.
-- `pytorch_inference.py` / `reference_model.py` — `PyTorchInferenceEngine` loads a model class dynamically by
-  dotted module/class name (config-driven, so any `nn.Module` can be swapped in without touching this file);
-  device/precision come from config, never hardcoded. `IDSModel` in `reference_model.py` is a placeholder
-  architecture with random-init weights for exercising the pipeline, not a trained model.
+- `pytorch_inference.py` — `PyTorchInferenceEngine` loads a model class dynamically by dotted module/class
+  name (config-driven, so any `nn.Module` can be swapped in without touching this file); device/precision
+  come from config, never hardcoded. The model class it loads by default, `IDSModel`, lives one level up at
+  `src/inference_ids/reference_model.py` (not in `adapters/`) — a placeholder architecture with random-init
+  weights for exercising the pipeline, not a trained model.
 - `kafka_source.py` — `KafkaFlowSource` is transport-only: `poll()` returns the JSON-decoded message value
   exactly as received, still wrapped as `{"conn": {...}}` — unwrapping is `JSONFlowParser`'s job, not this
   adapter's. Only errors where `confluent_kafka`'s `error.fatal()` is true are raised; everything else
