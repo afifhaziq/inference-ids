@@ -48,8 +48,20 @@ class InferenceEngineConfig:
 
 
 @dataclass
+class JSONLSinkConfig:
+    path: str
+
+
+@dataclass
 class SinkConfig:
     type: str
+    jsonl: JSONLSinkConfig | None = None
+    multi: MultiSinkConfig | None = None
+
+
+@dataclass
+class MultiSinkConfig:
+    sinks: list[SinkConfig]
 
 
 @dataclass
@@ -60,6 +72,11 @@ class PipelineConfig:
 
 
 @dataclass
+class EvaluationConfig:
+    label_map: dict[int, int] = field(default_factory=dict)
+
+
+@dataclass
 class AppConfig:
     source: SourceConfig
     parser: ParserConfig
@@ -67,6 +84,15 @@ class AppConfig:
     inference_engine: InferenceEngineConfig
     sink: SinkConfig
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
+
+
+def _parse_sink_config(raw: dict) -> SinkConfig:
+    jsonl = JSONLSinkConfig(**raw["jsonl"]) if "jsonl" in raw else None
+    multi = None
+    if "multi" in raw:
+        multi = MultiSinkConfig(sinks=[_parse_sink_config(child) for child in raw["multi"]["sinks"]])
+    return SinkConfig(type=raw["type"], jsonl=jsonl, multi=multi)
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -87,6 +113,7 @@ def load_config(path: str | Path) -> AppConfig:
             type=inference_raw["type"],
             pytorch=PyTorchEngineConfig(**inference_raw["pytorch"]) if "pytorch" in inference_raw else None,
         ),
-        sink=SinkConfig(**raw["sink"]),
+        sink=_parse_sink_config(raw["sink"]),
         pipeline=PipelineConfig(**raw.get("pipeline", {})),
+        evaluation=EvaluationConfig(**raw.get("evaluation", {})),
     )

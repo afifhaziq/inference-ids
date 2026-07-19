@@ -100,3 +100,42 @@ def test_create_flow_source_unknown_type_raises(config_path):
     config.source.type = "not-a-real-adapter"
     with pytest.raises(ValueError, match="not-a-real-adapter"):
         create_flow_source(config)
+
+
+def test_load_config_parses_multi_jsonl_sink(tmp_path):
+    raw = dict(RAW_CONFIG)
+    raw["sink"] = {
+        "type": "multi",
+        "multi": {
+            "sinks": [
+                {"type": "log"},
+                {"type": "jsonl", "jsonl": {"path": "/data/predictions.jsonl"}},
+            ]
+        },
+    }
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw))
+
+    config = load_config(path)
+
+    assert config.sink.type == "multi"
+    assert len(config.sink.multi.sinks) == 2
+    assert config.sink.multi.sinks[0].type == "log"
+    assert config.sink.multi.sinks[1].type == "jsonl"
+    assert config.sink.multi.sinks[1].jsonl.path == "/data/predictions.jsonl"
+
+
+def test_load_config_evaluation_label_map_defaults_to_empty(config_path):
+    config = load_config(config_path)
+    assert config.evaluation.label_map == {}
+
+
+def test_load_config_parses_evaluation_label_map(tmp_path):
+    raw = dict(RAW_CONFIG)
+    raw["evaluation"] = {"label_map": {5: 0, 6: 1}}
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw))
+
+    config = load_config(path)
+
+    assert config.evaluation.label_map == {5: 0, 6: 1}
