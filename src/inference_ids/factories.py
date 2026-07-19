@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from inference_ids.adapters.feature_extractor_stub import StubFeatureExtractor
 from inference_ids.adapters.json_parser import JSONFlowParser
+from inference_ids.adapters.jsonl_sink import JSONLResultSink
 from inference_ids.adapters.kafka_source import KafkaFlowSource
 from inference_ids.adapters.log_sink import LoggingResultSink
+from inference_ids.adapters.multi_sink import MultiResultSink
 from inference_ids.adapters.pytorch_inference import PyTorchInferenceEngine
 from inference_ids.adapters.tsv_parser import TSVFlowParser
-from inference_ids.config import AppConfig
+from inference_ids.config import AppConfig, SinkConfig
 from inference_ids.domain.ports import FeatureExtractor, FlowParser, FlowSource, InferenceEngine, ResultSink
 
 
@@ -52,6 +54,14 @@ def create_inference_engine(config: AppConfig) -> InferenceEngine:
 
 
 def create_result_sink(config: AppConfig) -> ResultSink:
-    if config.sink.type == "log":
+    return _build_sink(config.sink)
+
+
+def _build_sink(sink_config: SinkConfig) -> ResultSink:
+    if sink_config.type == "log":
         return LoggingResultSink()
-    raise ValueError(f"Unknown sink type: {config.sink.type!r}")
+    if sink_config.type == "jsonl":
+        return JSONLResultSink(path=sink_config.jsonl.path)
+    if sink_config.type == "multi":
+        return MultiResultSink(sinks=[_build_sink(child) for child in sink_config.multi.sinks])
+    raise ValueError(f"Unknown sink type: {sink_config.type!r}")

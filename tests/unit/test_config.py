@@ -13,8 +13,11 @@ from inference_ids.factories import (
 )
 from inference_ids.adapters.feature_extractor_stub import StubFeatureExtractor
 from inference_ids.adapters.json_parser import JSONFlowParser
+from inference_ids.adapters.jsonl_sink import JSONLResultSink
 from inference_ids.adapters.log_sink import LoggingResultSink
+from inference_ids.adapters.multi_sink import MultiResultSink
 from inference_ids.adapters.tsv_parser import TSVFlowParser
+from inference_ids.config import JSONLSinkConfig, MultiSinkConfig, SinkConfig
 
 RAW_CONFIG = {
     "source": {
@@ -139,3 +142,48 @@ def test_load_config_parses_evaluation_label_map(tmp_path):
     config = load_config(path)
 
     assert config.evaluation.label_map == {5: 0, 6: 1}
+
+
+def test_create_result_sink_dispatches_jsonl(tmp_path, config_path):
+    config = load_config(config_path)
+    config.sink = SinkConfig(type="jsonl", jsonl=JSONLSinkConfig(path=str(tmp_path / "predictions.jsonl")))
+
+    sink = create_result_sink(config)
+
+    assert isinstance(sink, JSONLResultSink)
+
+
+def test_create_result_sink_dispatches_multi_and_fans_out(tmp_path, config_path, caplog):
+    import logging
+
+    from inference_ids.domain.models import FlowRecord, Prediction
+
+    jsonl_path = tmp_path / "predictions.jsonl"
+    config = load_config(config_path)
+    config.sink = SinkConfig(
+        type="multi",
+        multi=MultiSinkConfig(
+            sinks=[
+                SinkConfig(type="log"),
+                SinkConfig(type="jsonl", jsonl=JSONLSinkConfig(path=str(jsonl_path))),
+            ]
+        ),
+    )
+
+    sink = create_result_sink(config)
+    assert isinstance(sink, MultiResultSink)
+
+    record = FlowRecord(
+        uid="C1", ts=0.0, duration=1.5, orig_h="10.0.0.1", orig_p=1111,
+        resp_h="10.0.0.2", resp_p=80, proto="tcp", service="http",
+        conn_state="SF", history="ShADadfF", missed_bytes=0,
+        orig_pkts=6, orig_ip_bytes=740, resp_pkts=8, resp_ip_bytes=1620,
+        orig_bytes=350, resp_bytes=1200, local_orig=True, local_resp=False,
+    )
+    prediction = Prediction(label="benign", confidence=0.9, logits=[1.0], class_index=0)
+
+    with caplog.at_level(logging.INFO, logger="inference_ids.results"):
+        sink.emit(record, prediction)
+
+    assert len(caplog.records) == 1
+    assert "C1" in jsonl_path.read_text()
