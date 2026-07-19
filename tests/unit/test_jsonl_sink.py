@@ -45,3 +45,15 @@ def test_emit_flushes_so_file_is_readable_before_close(tmp_path):
 
     # No sink.close() call -- file must already be readable via a second, independent open.
     assert path.read_text().strip() != ""
+
+
+def test_constructing_sink_truncates_existing_file(tmp_path):
+    path = tmp_path / "predictions.jsonl"
+    path.write_text('{"uid": "STALE", "predicted_index": 2, "predicted_label": "dos", "confidence": 0.5, "logits": [0.0]}\n')
+
+    sink = JSONLResultSink(str(path))
+    sink.emit(_record("C1"), Prediction(label="benign", confidence=0.9, logits=[1.0], class_index=0))
+
+    lines = path.read_text().strip().splitlines()
+    assert len(lines) == 1
+    assert "STALE" not in lines[0]

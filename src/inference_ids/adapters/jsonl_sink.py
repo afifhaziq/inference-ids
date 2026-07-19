@@ -9,7 +9,7 @@ class JSONLResultSink:
     """Persists one JSON line per prediction, keyed by Zeek uid, for offline label validation."""
 
     def __init__(self, path: str) -> None:
-        self._file = open(path, "a", encoding="utf-8")
+        self._file = open(path, "w", encoding="utf-8")
 
     def emit(self, record: FlowRecord, prediction: Prediction) -> None:
         row = {
