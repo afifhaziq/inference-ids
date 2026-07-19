@@ -47,6 +47,7 @@ class PyTorchInferenceEngine:
                     label=self._class_names[index],
                     confidence=confidence,
                     logits=logit_row,
+                    class_index=index,
                 )
             )
         return predictions

@@ -34,3 +34,4 @@ class Prediction:
     label: str
     confidence: float
     logits: list[float] = field(default_factory=list)
+    class_index: int = -1

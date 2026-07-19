@@ -53,3 +53,32 @@ def test_predict_confidence_matches_argmax_probability(tmp_path):
     probabilities = torch.softmax(torch.tensor(prediction.logits), dim=0)
     expected_confidence = probabilities.max().item()
     assert prediction.confidence == expected_confidence
+
+
+def test_predict_class_index_matches_label():
+    model = IDSModel(input_features=4, num_classes=3)
+    model.eval()
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        state_dict_path = Path(tmp) / "model.pth"
+        torch.save(model.state_dict(), state_dict_path)
+
+        engine = PyTorchInferenceEngine(
+            model_module="inference_ids.reference_model",
+            model_class="IDSModel",
+            state_dict_path=str(state_dict_path),
+            init_kwargs={"input_features": 4, "num_classes": 3},
+            class_names=["benign", "scan", "dos"],
+            device="cpu",
+            precision="fp32",
+        )
+
+        features = np.random.rand(5, 4).astype(np.float32)
+        predictions = engine.predict(features)
+
+    class_names = ["benign", "scan", "dos"]
+    for prediction in predictions:
+        assert prediction.class_index == class_names.index(prediction.label)
+        assert prediction.logits[prediction.class_index] == max(prediction.logits)
