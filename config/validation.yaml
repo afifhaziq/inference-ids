@@ -1,0 +1,52 @@
+source:
+  type: kafka
+  kafka:
+    bootstrap_servers: "localhost:9092"
+    topic: "zeek-flows"
+    group_id: "inference-ids"
+    auto_offset_reset: "latest"
+
+parser:
+  type: json
+
+feature_extractor:
+  type: stub
+
+inference_engine:
+  type: pytorch
+  pytorch:
+    module: "inference_ids.reference_model"
+    class_name: "IDSModel"
+    state_dict_path: "/models/reference_ids_model.pth"
+    init_kwargs:
+      input_features: 11
+      num_classes: 3
+    class_names:
+      - benign
+      - scan
+      - dos
+    device: cpu
+    precision: fp32
+
+sink:
+  type: multi
+  multi:
+    sinks:
+      - type: log
+      - type: jsonl
+        jsonl:
+          path: /data/predictions.jsonl
+
+pipeline:
+  batch_window_ms: 100
+  max_batch_size: 256
+  poll_timeout_seconds: 0.05
+
+# Maps dataset label ints -> model class indices (0=benign, 1=scan, 2=dos here).
+# Defaults to identity if omitted entirely; override per-key if your dataset's
+# label encoding differs from config's inference_engine.pytorch.class_names order.
+evaluation:
+  label_map:
+    0: 0
+    1: 1
+    2: 2

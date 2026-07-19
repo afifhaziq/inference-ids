@@ -7,5 +7,7 @@ pcaps/*
 !pcaps/.gitkeep
 models/*
 !models/.gitkeep
+predictions/*
+!predictions/.gitkeep
 
 .claude/

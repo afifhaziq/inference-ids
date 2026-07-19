@@ -7,6 +7,7 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./models:/models:ro
+      - ./predictions:/data:rw
       - kafka-data:/var/lib/kafka/data
     ports:
       - "9092:9092"
