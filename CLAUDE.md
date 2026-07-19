@@ -30,11 +30,15 @@ uv run pytest                    # run the full test suite
 uv run pytest tests/unit/test_pipeline.py -v   # run a single test file
 uv run pytest tests/unit/test_pipeline.py::test_run_one_window_batches_all_messages_within_window  # single test
 
-docker compose build             # build sensor + backend images
+make build                       # docker compose build (sensor + backend)
 make up                          # docker compose up -d
 make down                        # docker compose down
 make replay PCAP=pcaps/quickstart.pcap [PPS=100]   # replay a pcap into the running sensor container
 make test                        # uv run pytest
+
+uv run python -m inference_ids.evaluate \
+  --predictions predictions/predictions.jsonl --labels labels.jsonl --config config/validation.yaml
+  # offline: score a JSONLResultSink run against a labels file (see "Offline label validation" below)
 ```
 
 Before first `docker compose up`, a reference model checkpoint must exist at
@@ -104,6 +108,13 @@ near-immediate per-flow inference; larger values trade latency for throughput.
   treated as "no message this cycle" and retried on the next poll — this was a real crash-on-fresh-boot bug,
   not a defensive nicety, so don't revert it to raising on every error.
 - `log_sink.py` — `LoggingResultSink` logs one line per prediction via `logging.getLogger("inference_ids.results")`.
+- `jsonl_sink.py` — `JSONLResultSink` persists one JSON line per prediction (`uid`, `predicted_index`,
+  `predicted_label`, `confidence`, `logits`), keyed by Zeek `uid` so predictions can later be joined against
+  a labels file. It **truncates its output file on construction** (open in `"w"` mode) specifically so
+  re-running a validation pass never silently mixes in a prior run's predictions.
+- `multi_sink.py` — `MultiResultSink` fans one `emit()` call out to a list of other `ResultSink`s, in order
+  (e.g. `log` + `jsonl` together) — used by `config/validation.yaml` so console logging and JSONL persistence
+  happen from a single pipeline run.
 
 ### Wiring (`config.py`, `factories.py`, `bootstrap.py`)
 
@@ -114,6 +125,19 @@ it returns is typed as the port Protocol. Adding a new adapter means adding one 
 touching `pipeline.py` or `bootstrap.py`. `bootstrap.py`'s `build_pipeline(config)` calls all five factories
 and constructs the `InferencePipeline`; `__main__.py` is the CLI entrypoint (`python -m inference_ids
 --config <path>`).
+
+### Offline label validation (`evaluate.py`, `config/validation.yaml`)
+
+Fully decoupled from the live pipeline — checking happens *after* a batch is classified, not on the fly, and
+none of `application/pipeline.py`, `bootstrap.py`, or the five domain ports know this feature exists.
+`config/validation.yaml` swaps `sink` to `multi` (`log` + `jsonl`, writing to `/data/predictions.jsonl`,
+`docker-compose.yml`'s mount for the host's `predictions/` dir) and adds an `evaluation.label_map` section
+that only `evaluate.py`'s CLI reads (`AppConfig.evaluation`, `config.py`) — the live pipeline ignores it
+entirely. `evaluate.py` joins predictions and a separately-supplied `{uid, label}` JSONL labels file on
+`uid`, remaps dataset label ints through `label_map` (identity if omitted) to the model's class-index order
+(`inference_engine.pytorch.class_names`), and prints matched/unmatched counts plus an `sklearn`
+classification report and confusion matrix — unmatched predictions/labels are always counted and shown,
+never silently dropped.
 
 ### Zeek config (`docker/sensor/local.zeek`)
 

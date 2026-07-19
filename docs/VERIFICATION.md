@@ -84,6 +84,39 @@ scoring real traffic, confirm with the model-training team:
 
 Do not swap in a production `FeatureExtractor` until this is answered.
 
+### What the stub currently does
+
+`extract()` takes the `list[FlowRecord]` collected by one `InferencePipeline` batch window and returns a
+`numpy.ndarray` of shape `(len(records), 11)`, dtype `float32` — `feature_count = 11` must match
+`config/default.yaml`'s `inference_engine.pytorch.init_kwargs.input_features`. An empty batch returns shape
+`(0, 11)` and never reaches the model. Columns, in order:
+
+| # | Feature | Derivation |
+|---|---|---|
+| 0 | `duration` | `record.duration` as-is |
+| 1 | protocol index | `{"tcp": 0, "udp": 1, "icmp": 2}`, `-1` if unrecognized |
+| 2 | `orig_bytes` | as-is |
+| 3 | `resp_bytes` | as-is |
+| 4 | `orig_pkts` | as-is |
+| 5 | `resp_pkts` | as-is |
+| 6 | `total_bytes` | `orig_bytes + resp_bytes` |
+| 7 | `total_pkts` | `orig_pkts + resp_pkts` |
+| 8 | `byte_ratio` | `orig_bytes / resp_bytes`, or `orig_bytes` if `resp_bytes == 0` |
+| 9 | `history` length | `len(record.history)` (Zeek's connection-state-flag string, e.g. `"ShADadFf"`) |
+| 10 | `missed_bytes` | as-is |
+
+Example — one TCP flow with `duration=1.5`, `orig_bytes=500`, `resp_bytes=1000`, `orig_pkts=4`,
+`resp_pkts=6`, `history="ShADadFf"` (8 chars), `missed_bytes=0`:
+
+```python
+extractor = StubFeatureExtractor()
+extractor.extract([record])
+# array([[1.5, 0.0, 500.0, 1000.0, 4.0, 6.0, 1500.0, 10.0, 0.5, 8.0, 0.0]], dtype=float32)
+```
+
+This is what today's placeholder does, not the real feature contract — replace this table entirely once
+the model-training team's answer above is in hand.
+
 ## 5. Single-sample inference
 
 ```bash
